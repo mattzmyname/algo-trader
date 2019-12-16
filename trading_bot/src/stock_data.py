@@ -95,14 +95,11 @@ def get_historical_stock_data(symbols=None, days=1, to_db=False):
 	
 	from_day = (datetime.today() - timedelta(days=days)).astimezone(pytz.timezone("America/New_York"))
 	from_day_fmt = from_day.strftime('%Y-%m-%d')
-	today = datetime.today().astimezone(pytz.timezone("America/New_York"))
-	today_fmt = today.strftime('%Y-%m-%d')
-	
 	hist_data = []
 	for symbol in symbols:
 		try:
 			data = api.polygon.historic_agg_v2(
-				symbol=symbol, multiplier=1, timespan='hour', _from=from_day_fmt, to=today_fmt
+				symbol=symbol, multiplier=1, timespan='hour', _from=from_day_fmt
 			).df
 			data.insert(0, column='symbol', value=symbol)
 			hist_data.append(data)
@@ -121,7 +118,7 @@ def daily_equity_prices(symbols=None):
 	api = get_alpaca_api()
 	try:
 		today = datetime.today()
-		if api.get_calendar(today, today) == today:
+		if api.get_calendar(today, today)[0].date == today:
 			return get_historical_stock_data(symbols, days=0, to_db=False)
 		# get today's stock info
 		else:
@@ -134,5 +131,5 @@ def daily_equity_prices(symbols=None):
 
 if __name__ == '__main__':
 	start_time = time.time()
-	print(get_historical_stock_data(days=100, to_db=True))
+	print(get_historical_stock_data(symbols=['AAPL']))
 	print(f'Completed in {time.time() - start_time} seconds ')

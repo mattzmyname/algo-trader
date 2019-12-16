@@ -348,9 +348,6 @@ def run(tickers, market_open_dt, market_close_dt):
 		]
 		volume_today[data.symbol] += data.volume
 	
-	@conn.on(r'^')
-	async def on_status(conn, channel, data):
-		print(datetime.now(), data)
 	
 	channels = ['trade_updates']
 	for symbol in symbols:
@@ -383,3 +380,4 @@ def main():
 
 if __name__ == "__main__":
 	main()
+

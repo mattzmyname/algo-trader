@@ -1,7 +1,0 @@
-requests
-pandas
-numpy
-beautifulsoup4
-alpaca-trade-api>=0.25
-ta
-sklearn

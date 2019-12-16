@@ -1,6 +1,7 @@
 import alpaca_trade_api as tradeapi
 import requests
 import time
+import stock_data
 from ta.trend import macd
 import numpy as np
 from datetime import datetime, timedelta
@@ -370,28 +371,10 @@ def run_ws(conn, channels):
 
 
 def main():
-	# Get when the market opens or opened today
-	nyc = timezone('America/New_York')
-	today = datetime.today().astimezone(nyc)
-	today_str = datetime.today().astimezone(nyc).strftime('%Y-%m-%d')
-	calendar = api.get_calendar(start=today_str, end=today_str)[0]
-	market_open = today.replace(
-		hour=calendar.open.hour,
-		minute=calendar.open.minute,
-		second=0
-	)
-	market_open = market_open.astimezone(nyc)
-	market_close = today.replace(
-		hour=calendar.close.hour,
-		minute=calendar.close.minute,
-		second=0
-	)
-	market_close = market_close.astimezone(nyc)
-	
+	market_open, market_close = stock_data.trading_times()
 	# Wait until just before we might want to trade
-	current_dt = datetime.today().astimezone(nyc)
+	current_dt = datetime.today().astimezone(timezone('America/New_York'))
 	since_market_open = current_dt - market_open
-	
 	while since_market_open.seconds // 60 <= 14:
 		time.sleep(1)
 		since_market_open = current_dt - market_open
@@ -399,4 +382,4 @@ def main():
 
 
 if __name__ == "__main__":
-	print(get_1000m_history_data(['AAPL']))
+	main()

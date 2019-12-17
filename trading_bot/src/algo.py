@@ -36,9 +36,7 @@ def get_1000m_history_data(symbols):
 	minute_history = {}
 	c = 0
 	for symbol in symbols:
-		minute_history[symbol] = api.polygon.historic_agg(
-			size="minute", symbol=symbol, limit=1000
-		).df
+		minute_history[symbol] = stock_data.get_minute_historical(symbol, num_minutes=1000)
 		c += 1
 		print('{}/{}'.format(c, len(symbols)))
 	print('Success.')
@@ -51,7 +49,7 @@ def get_tickers():
 	symbols = [asset.symbol for asset in assets if asset.tradable]
 	tickers = api.polygon.all_tickers()
 	print('Success.')
-
+	
 	return [ticker for ticker in tickers if (
 			ticker.ticker in symbols and
 			ticker.lastTrade['p'] >= min_share_price and
@@ -310,9 +308,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				except Exception as e:
 					print(e)
 			return
-		elif (
-				until_market_close.seconds // 60 <= 15
-		):
+		elif until_market_close.seconds // 60 <= 15:
 			# Liquidate remaining positions on watched symbols at market
 			try:
 				position = api.get_position(symbol)
@@ -348,7 +344,6 @@ def run(tickers, market_open_dt, market_close_dt):
 		]
 		volume_today[data.symbol] += data.volume
 	
-	
 	channels = ['trade_updates']
 	for symbol in symbols:
 		symbol_channels = ['A.{}'.format(symbol), 'AM.{}'.format(symbol)]
@@ -380,4 +375,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-

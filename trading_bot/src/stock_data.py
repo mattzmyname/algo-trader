@@ -1,10 +1,6 @@
 import pandas as pd
-import numpy as np
-import requests
 import pytz
-import string
 import time
-from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from credentials import td, alpaca, rds
 from sqlalchemy import create_engine
@@ -30,7 +26,7 @@ def get_db_connection():
 	password = rds['password']
 	host = "db-1.cztzalypzdly.us-east-1.rds.amazonaws.com"
 	connect_str = f"mysql+pymysql://{user}:{password}@{host}:3306/mydb"
-	engine = create_engine(connect_str, echo=True)
+	engine = create_engine(connect_str)
 	
 	return engine
 
@@ -65,7 +61,6 @@ def trading_times():
 	return market_open, market_close
 
 
-# Get the historical dates you need.
 def get_tradable_symbols():
 	# Get a current list of all the stock symbols
 	assets = get_alpaca_api().list_assets()
@@ -92,19 +87,17 @@ def get_historical_stock_data(symbols=None, days=1, to_db=False):
 		symbols = get_tradable_symbols()
 	
 	api = get_alpaca_api()
-	
-	from_day = (datetime.today() - timedelta(days=days)).astimezone(pytz.timezone("America/New_York"))
+	nyc = pytz.timezone("America/New_York")
+	today_str = datetime.today().astimezone(nyc).strftime('%Y-%m-%d')
+	from_day = (datetime.today() - timedelta(days=days)).astimezone(nyc)
 	from_day_fmt = from_day.strftime('%Y-%m-%d')
 	hist_data = []
 	for symbol in symbols:
-		try:
-			data = api.polygon.historic_agg_v2(
-				symbol=symbol, multiplier=1, timespan='hour', _from=from_day_fmt
-			).df
-			data.insert(0, column='symbol', value=symbol)
-			hist_data.append(data)
-		except:
-			print(f"No data for {symbol}")
+		data = api.polygon.historic_agg_v2(
+			symbol=symbol, multiplier=1, timespan='hour', _from=from_day_fmt, to=today_str
+		).df
+		data.insert(0, column='symbol', value=symbol)
+		hist_data.append(data)
 	
 	df = pd.concat([each for each in hist_data], sort=False)
 	df = index_to_timestamp(df)
@@ -114,22 +107,14 @@ def get_historical_stock_data(symbols=None, days=1, to_db=False):
 	return df
 
 
-def daily_equity_prices(symbols=None):
+def get_minute_historical(symbol, num_minutes=1):
 	api = get_alpaca_api()
-	try:
-		today = datetime.today()
-		if api.get_calendar(today, today)[0].date == today:
-			return get_historical_stock_data(symbols, days=0, to_db=False)
-		# get today's stock info
-		else:
-			print("Market Not Open Today")
-	
-	except KeyError:
-		# Not a weekday
-		pass
+	return api.polygon.historic_agg(
+		size="minute", symbol=symbol, limit=num_minutes
+	).df
 
 
 if __name__ == '__main__':
 	start_time = time.time()
-	print(get_historical_stock_data(symbols=['AAPL']))
+	api = get_alpaca_api()
 	print(f'Completed in {time.time() - start_time} seconds ')

@@ -5,6 +5,9 @@ import requests
 import asyncio
 
 
+# READ THIS
+# cron this script to the frequency in which we want data during open market
+
 def get_sp500_tickers():
 	resp = requests.get('http://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
 	soup = bs.BeautifulSoup(resp.text, 'lxml')
@@ -30,9 +33,9 @@ async def main():
 	start_time = time.time()
 	api = get_alpaca_api()
 	sp500 = get_sp500_tickers()
-	if not api.get_clock().is_open:
+	if api.get_clock().is_open:
 		tasks = []
-		for symbol in sp500[:100]:
+		for symbol in sp500:
 			try:
 				tasks.append(insert_one_to_db(symbol))
 			except Exception as e:

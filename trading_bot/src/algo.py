@@ -28,7 +28,7 @@ min_last_dv = 500000
 # Stop limit to default to
 default_stop = .95
 # How much of our portfolio to allocate to any one position
-risk = 0.001
+risk = 0.01
 
 
 def get_1000m_history_data(symbols):
@@ -46,7 +46,7 @@ def get_1000m_history_data(symbols):
 def get_tickers():
 	print('Getting current ticker data...')
 	assets = api.list_assets()
-	symbols = [asset.symbol for asset in assets if asset.tradable]
+	symbols = {asset.symbol for asset in assets if asset.tradable}
 	tickers = api.polygon.all_tickers()
 	print('Success.')
 	
@@ -60,6 +60,8 @@ def get_tickers():
 
 
 def find_stop(current_value, minute_history, now):
+	# this functions finds the price of the most recent price valley eg. 26 -> {24} -> 25
+	# otherwise limit our loss to 5%
 	series = minute_history['low'][-100:] \
 		.dropna().resample('5min').min()
 	series = series[now.floor('1D'):]
@@ -82,11 +84,10 @@ def run(tickers, market_open_dt, market_close_dt):
 		prev_closes[symbol] = ticker.prevDay['c']
 		volume_today[symbol] = ticker.day['v']
 	
-	symbols = [ticker.ticker for ticker in tickers]
+	# generate our list of watched symbols
+	symbols = {ticker.ticker for ticker in tickers}
 	print('Tracking {} symbols.'.format(len(symbols)))
 	minute_history = get_1000m_history_data(symbols)
-	
-	portfolio_value = float(api.get_account().portfolio_value)
 	
 	open_orders = {}
 	positions = {}
@@ -109,7 +110,7 @@ def run(tickers, market_open_dt, market_close_dt):
 			latest_cost_basis[position.symbol] = float(position.cost_basis)
 			stop_prices[position.symbol] = (
 					float(position.cost_basis) * default_stop
-			)
+			)  # limit our loss to 5% from cost basis
 	
 	# Keep track of what we're buying/selling
 	target_prices = {}
@@ -118,6 +119,7 @@ def run(tickers, market_open_dt, market_close_dt):
 	# Use trade updates to keep track of our portfolio
 	@conn.on(r'trade_update')
 	async def handle_trade_update(conn, channel, data):
+		print(data)
 		symbol = data.order['symbol']
 		last_order = open_orders.get(symbol)
 		if last_order is not None:
@@ -148,6 +150,7 @@ def run(tickers, market_open_dt, market_close_dt):
 	
 	@conn.on(r'A$')
 	async def handle_second_bar(conn, channel, data):
+		print(data)
 		symbol = data.symbol
 		
 		# First, aggregate 1s bars for up-to-date MACD calculations
@@ -157,7 +160,6 @@ def run(tickers, market_open_dt, market_close_dt):
 			current = minute_history[data.symbol].loc[ts]
 		except KeyError:
 			current = None
-		new_data = []
 		if current is None:
 			new_data = [
 				data.open,
@@ -203,7 +205,6 @@ def run(tickers, market_open_dt, market_close_dt):
 			# See how high the price went during the first 15 minutes
 			lbound = market_open_dt
 			ubound = lbound + timedelta(minutes=15)
-			high_15m = 0
 			try:
 				high_15m = minute_history[symbol][lbound:ubound]['high'].max()
 			except Exception as e:
@@ -247,13 +248,16 @@ def run(tickers, market_open_dt, market_close_dt):
 				target_prices[symbol] = data.close + (
 						(data.close - stop_price) * 3
 				)
-				shares_to_buy = portfolio_value * risk // (
-						data.close - stop_price
-				)
+				# buy enough shares to account for 1% of portfolio
+				shares_to_buy = float(api.get_account().portfolio_value) * risk // data.close
+				
 				if shares_to_buy == 0:
 					shares_to_buy = 1
 				shares_to_buy -= positions.get(symbol, 0)
-				if shares_to_buy <= 0:
+				
+				if data.close - stop_price <= 0 or shares_to_buy * data.close < float(api.get_account().cash):
+					# do not buy if the price is below or stop price
+					# or we do not have enough cash
 					return
 				
 				print('Submitting buy for {} shares of {} at {}'.format(
@@ -343,6 +347,8 @@ def run(tickers, market_open_dt, market_close_dt):
 			data.volume
 		]
 		volume_today[data.symbol] += data.volume
+		print(data)
+
 	
 	channels = ['trade_updates']
 	for symbol in symbols:

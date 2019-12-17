@@ -32,7 +32,7 @@ async def main():
 	sp500 = get_sp500_tickers()
 	if not api.get_clock().is_open:
 		tasks = []
-		for symbol in sp500[:100]:
+		for symbol in sp500:
 			try:
 				tasks.append(insert_one_to_db(symbol))
 			except Exception as e:

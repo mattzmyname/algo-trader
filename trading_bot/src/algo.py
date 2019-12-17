@@ -169,8 +169,8 @@ def run(tickers, market_open_dt, market_close_dt):
 		else:
 			new_data = [
 				current.open,
-				data.high if data.high > current.high else current.high,
-				data.low if data.low < current.low else current.low,
+				max(data.high, current.high),
+				min(data.low, current.low),
 				data.close,
 				current.volume + data.volume
 			]

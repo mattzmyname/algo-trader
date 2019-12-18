@@ -1,6 +1,7 @@
 import pandas as pd
 import pytz
 import time
+import aiomysql
 from datetime import datetime, timedelta
 from credentials import td, alpaca, rds
 from sqlalchemy import create_engine
@@ -11,15 +12,6 @@ import alpaca_trade_api as tradeapi
 # Price History API Documentation
 # https://developer.tdameritrade.com/price-history/apis/get/marketdata/%7Bsymbol%7D/pricehistory
 
-# Function to turn a datetime object into unix
-def unix_time_millis(dt):
-	epoch = datetime.utcfromtimestamp(0)
-	return int((dt - epoch).total_seconds() * 1000.0)
-
-
-def epoch_to_dt(epoch):
-	return datetime.fromtimestamp(epoch).strftime('%c')
-
 
 def get_db_connection():
 	user = rds['user']
@@ -29,6 +21,21 @@ def get_db_connection():
 	engine = create_engine(connect_str)
 	
 	return engine
+
+
+async def a_insert(loop, table, myDict):
+	conn = await aiomysql.connect(user=rds['user'], db='mydb', port=3306,
+	                              host="db-1.cztzalypzdly.us-east-1.rds.amazonaws.com",
+	                              password=rds['password'], loop=loop)
+	
+	async with conn.cursor() as cur:
+		placeholders = ', '.join(['%s'] * len(myDict))
+		columns = ', '.join(myDict.keys())
+		sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % (table, columns, placeholders)
+		await cur.executemany(sql, (list(myDict.values()),))
+		await conn.commit()
+		
+	conn.close()
 
 
 def index_to_timestamp(df):
@@ -117,4 +124,5 @@ def get_minute_historical(symbol, num_minutes=1):
 if __name__ == '__main__':
 	start_time = time.time()
 	api = get_alpaca_api()
+	print(api.list_positions())
 	print(f'Completed in {time.time() - start_time} seconds ')

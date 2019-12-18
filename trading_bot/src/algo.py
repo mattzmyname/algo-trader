@@ -11,7 +11,6 @@ from credentials import alpaca
 base_url = 'https://paper-api.alpaca.markets'
 api_key_id = alpaca['api_key']
 api_secret = alpaca['secret_key']
-
 api = tradeapi.REST(
 	base_url=base_url,
 	key_id=api_key_id,
@@ -22,7 +21,7 @@ session = requests.session()
 
 # We only consider stocks with per-share prices inside this range
 min_share_price = 2.0
-max_share_price = 13.0
+max_share_price = 130
 # Minimum previous-day dollar volume for a stock we might consider
 min_last_dv = 500000
 # Stop limit to default to
@@ -75,7 +74,6 @@ def find_stop(current_value, minute_history, now):
 def run(tickers, market_open_dt, market_close_dt):
 	# Establish streaming connection
 	conn = tradeapi.StreamConn(base_url=base_url, key_id=api_key_id, secret_key=api_secret)
-	
 	# Update initial state with information from tickers
 	volume_today = {}
 	prev_closes = {}
@@ -275,7 +273,7 @@ def run(tickers, market_open_dt, market_close_dt):
 					print(e)
 				return
 		if (
-				since_market_open.seconds // 60 >= 24 and
+				since_market_open.seconds // 60 >= 15 and
 				until_market_close.seconds // 60 > 15
 		):
 			# Check for liquidation signals
@@ -290,7 +288,7 @@ def run(tickers, market_open_dt, market_close_dt):
 			# Sell for a profit if it's above our target price
 			hist = macd(
 				minute_history[symbol]['close'].dropna(),
-				n_fast=13,
+				n_fast=12,
 				n_slow=21
 			)
 			if (
@@ -348,14 +346,14 @@ def run(tickers, market_open_dt, market_close_dt):
 		]
 		volume_today[data.symbol] += data.volume
 		print(data)
-
 	
 	channels = ['trade_updates']
 	for symbol in symbols:
 		symbol_channels = ['A.{}'.format(symbol), 'AM.{}'.format(symbol)]
 		channels += symbol_channels
 	print('Watching {} symbols.'.format(len(symbols)))
-	run_ws(conn, channels)
+	if len(symbols) > 0:
+		run_ws(conn, channels)
 
 
 # Handle failed websocket connections by reconnecting

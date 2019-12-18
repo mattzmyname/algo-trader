@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/3.0/ref/settings/
 """
 
 import os
-
+from src.credentials import rds
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -78,6 +78,14 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+    },
+    'mysql': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'db-1.cztzalypzdly.us-east-1.rds.amazonaws.com',
+        'USER': rds['user'],
+        'PASSWORD': rds['password'],
+        'HOST': 'db-1.cztzalypzdly.us-east-1.rds.amazonaws.com',
+        'PORT': '3306',
     }
 }
 

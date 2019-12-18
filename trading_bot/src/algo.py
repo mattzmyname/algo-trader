@@ -1,6 +1,7 @@
 import alpaca_trade_api as tradeapi
 import requests
 import time
+import asyncio
 import stock_data
 from ta.trend import macd
 import numpy as np
@@ -21,13 +22,13 @@ session = requests.session()
 
 # We only consider stocks with per-share prices inside this range
 min_share_price = 2.0
-max_share_price = 130
+max_share_price = 13.0
 # Minimum previous-day dollar volume for a stock we might consider
 min_last_dv = 500000
 # Stop limit to default to
 default_stop = .95
 # How much of our portfolio to allocate to any one position
-risk = 0.01
+max_allocation = 0.01
 
 
 def get_1000m_history_data(symbols):
@@ -83,10 +84,9 @@ def run(tickers, market_open_dt, market_close_dt):
 		volume_today[symbol] = ticker.day['v']
 	
 	# generate our list of watched symbols
-	symbols = {ticker.ticker for ticker in tickers}
+	symbols = {ticker.ticker for ticker in tickers[:10]}
 	print('Tracking {} symbols.'.format(len(symbols)))
 	minute_history = get_1000m_history_data(symbols)
-	
 	open_orders = {}
 	positions = {}
 	
@@ -117,7 +117,6 @@ def run(tickers, market_open_dt, market_close_dt):
 	# Use trade updates to keep track of our portfolio
 	@conn.on(r'trade_update')
 	async def handle_trade_update(conn, channel, data):
-		print(data)
 		symbol = data.order['symbol']
 		last_order = open_orders.get(symbol)
 		if last_order is not None:
@@ -132,6 +131,8 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = qty
 				positions[symbol] += qty
 				open_orders[symbol] = data.order
+				print(f"Filled partial {data.order['side']} order. {abs(qty)} shares @ {data.order['price']} ")
+			
 			elif event == 'fill':
 				qty = int(data.order['filled_qty'])
 				if data.order['side'] == 'sell':
@@ -142,15 +143,14 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = 0
 				positions[symbol] += qty
 				open_orders[symbol] = None
+				print(f"Filled {data.order['side']} order. {abs(qty)} shares @ {data.order['price']} ")
 			elif event == 'canceled' or event == 'rejected':
 				partial_fills[symbol] = 0
 				open_orders[symbol] = None
 	
 	@conn.on(r'A$')
 	async def handle_second_bar(conn, channel, data):
-		print(data)
 		symbol = data.symbol
-		
 		# First, aggregate 1s bars for up-to-date MACD calculations
 		ts = data.start
 		ts -= timedelta(seconds=ts.second, microseconds=ts.microsecond)
@@ -175,7 +175,6 @@ def run(tickers, market_open_dt, market_close_dt):
 				current.volume + data.volume
 			]
 		minute_history[symbol].loc[ts] = new_data
-		
 		# Next, check for existing orders for the stock
 		existing_order = open_orders.get(symbol)
 		if existing_order is not None:
@@ -192,12 +191,13 @@ def run(tickers, market_open_dt, market_close_dt):
 		# Now we check to see if it might be time to buy or sell
 		since_market_open = ts - market_open_dt
 		until_market_close = market_close_dt - ts
-		if 15 < since_market_open.seconds // 60 < 60:
+		if (
+				15 < since_market_open.seconds // 60 < 60
+		):
 			# Check for buy signals
 			
 			# See if we've already bought in first
-			position = positions.get(symbol, 0)
-			if position > 0:
+			if positions.get(symbol, 0) > 0:
 				return
 			
 			# See how high the price went during the first 15 minutes
@@ -247,7 +247,7 @@ def run(tickers, market_open_dt, market_close_dt):
 						(data.close - stop_price) * 3
 				)
 				# buy enough shares to account for 1% of portfolio
-				shares_to_buy = float(api.get_account().portfolio_value) * risk // data.close
+				shares_to_buy = float(api.get_account().portfolio_value) * max_allocation // data.close
 				
 				if shares_to_buy == 0:
 					shares_to_buy = 1
@@ -279,8 +279,7 @@ def run(tickers, market_open_dt, market_close_dt):
 			# Check for liquidation signals
 			
 			# We can't liquidate if there's no position
-			position = positions.get(symbol, 0)
-			if position == 0:
+			if positions.get(symbol, 0) == 0:
 				return
 			
 			# Sell for a loss if it's fallen below our stop price
@@ -297,11 +296,11 @@ def run(tickers, market_open_dt, market_close_dt):
 					(data.close <= latest_cost_basis[symbol] and hist[-1] <= 0)
 			):
 				print('Submitting sell for {} shares of {} at {}'.format(
-					position, symbol, data.close
+					positions.get(symbol, 0), symbol, data.close
 				))
 				try:
 					o = api.submit_order(
-						symbol=symbol, qty=str(position), side='sell',
+						symbol=symbol, qty=str(positions.get(symbol, 0)), side='sell',
 						type='limit', time_in_force='day',
 						limit_price=str(data.close)
 					)
@@ -331,6 +330,8 @@ def run(tickers, market_open_dt, market_close_dt):
 				'A.{}'.format(symbol),
 				'AM.{}'.format(symbol)
 			])
+		else:
+			print(f"{ts} is outside trading hours. Currently watching {len(symbols)} symbols")
 	
 	# Replace aggregated 1s bars with incoming 1m bars
 	@conn.on(r'AM$')
@@ -344,8 +345,20 @@ def run(tickers, market_open_dt, market_close_dt):
 			data.close,
 			data.volume
 		]
+		# insert bar into minute_stock db
+	
+		minute_data = {
+			'timestamp': ts.to_pydatetime(),
+			'symbol': symbol,
+			'open': data.open,
+			'high': data.high,
+			'low': data.low,
+			'close': data.close,
+			'volume': data.volume
+		}
+		loop = asyncio.get_running_loop()
+		await stock_data.a_insert(loop, "minute_stocks", minute_data)
 		volume_today[data.symbol] += data.volume
-		print(data)
 	
 	channels = ['trade_updates']
 	for symbol in symbols:
@@ -362,6 +375,7 @@ def run_ws(conn, channels):
 		conn.run(channels)
 	except Exception as e:
 		print(e)
+		print("Reconnecting...")
 		conn.close()
 		run_ws(conn, channels)
 
@@ -379,3 +393,4 @@ def main():
 
 if __name__ == "__main__":
 	main()
+	

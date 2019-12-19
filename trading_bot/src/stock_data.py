@@ -32,7 +32,11 @@ async def a_insert(loop, table, myDict):
 		placeholders = ', '.join(['%s'] * len(myDict))
 		columns = ', '.join(myDict.keys())
 		sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % (table, columns, placeholders)
-		await cur.executemany(sql, (list(myDict.values()),))
+		try:
+			await cur.executemany(sql, (list(myDict.values()),))
+		except Exception as e:
+			print(e)
+			pass
 		await conn.commit()
 		
 	conn.close()
@@ -124,5 +128,5 @@ def get_minute_historical(symbol, num_minutes=1):
 if __name__ == '__main__':
 	start_time = time.time()
 	api = get_alpaca_api()
-	print(api.list_positions())
+	print(api.get_account())
 	print(f'Completed in {time.time() - start_time} seconds ')

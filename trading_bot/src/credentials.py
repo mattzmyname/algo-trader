@@ -2,8 +2,8 @@ td = {
 	"consumer_key": "NIV6PVKLLKBC1V5BT2AXSMLU2J27VVRM"
 }
 alpaca = {
-	"api_key": "PKX7A2M2R7FBKULCK8GW",
-	"secret_key": "kqQ9PHSg0cNROLlyXhQrgIJU9yodVZ8IDt42pCyd"
+	"api_key": "PKZ1TQ6TTBJH2SZEVZE2",
+	"secret_key": "mHjqEOSL0e/3rjLHWjJLrpdVbZ90vhEL3HF4t6R8"
 }
 
 rds = {

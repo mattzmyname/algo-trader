@@ -1,6 +1,7 @@
 import alpaca_trade_api as tradeapi
 import requests
 import time
+import functools
 import asyncio
 import stock_data
 from ta.trend import macd
@@ -21,14 +22,19 @@ api = tradeapi.REST(
 session = requests.session()
 
 # We only consider stocks with per-share prices inside this range
-min_share_price = 2.0
-max_share_price = 13.0
+min_share_price = 5.0
+max_share_price = 50
 # Minimum previous-day dollar volume for a stock we might consider
-min_last_dv = 500000
+min_last_dv = 1000000
 # Stop limit to default to
 default_stop = .95
 # How much of our portfolio to allocate to any one position
 max_allocation = 0.01
+
+
+@functools.lru_cache(maxsize=128)
+def get_current_portfolio_value():
+	return float(api.get_account().portfolio_value)
 
 
 def get_1000m_history_data(symbols):
@@ -62,9 +68,7 @@ def get_tickers():
 def find_stop(current_value, minute_history, now):
 	# this functions finds the price of the most recent price valley eg. 26 -> {24} -> 25
 	# otherwise limit our loss to 5%
-	series = minute_history['low'][-100:] \
-		.dropna().resample('5min').min()
-	series = series[now.floor('1D'):]
+	series = minute_history['low'][-100:]
 	diff = np.diff(series.values)
 	low_index = np.where((diff[:-1] <= 0) & (diff[1:] > 0))[0] + 1
 	if len(low_index) > 0:
@@ -84,7 +88,7 @@ def run(tickers, market_open_dt, market_close_dt):
 		volume_today[symbol] = ticker.day['v']
 	
 	# generate our list of watched symbols
-	symbols = {ticker.ticker for ticker in tickers[:10]}
+	symbols = {ticker.ticker for ticker in tickers}
 	print('Tracking {} symbols.'.format(len(symbols)))
 	minute_history = get_1000m_history_data(symbols)
 	open_orders = {}
@@ -102,14 +106,16 @@ def run(tickers, market_open_dt, market_close_dt):
 	# Track any positions bought during previous executions
 	existing_positions = api.list_positions()
 	for position in existing_positions:
-		if position.symbol in symbols:
-			positions[position.symbol] = float(position.qty)
-			# Recalculate cost basis and stop price
-			latest_cost_basis[position.symbol] = float(position.cost_basis)
-			stop_prices[position.symbol] = (
-					float(position.cost_basis) * default_stop
-			)  # limit our loss to 5% from cost basis
-	
+		symbols.add(position.symbol)
+		# if position.symbol in symbols:
+		positions[position.symbol] = float(position.qty)
+		# Recalculate cost basis and stop price
+		latest_cost_basis[position.symbol] = float(position.cost_basis)
+		stop_prices[position.symbol] = (
+				float(position.cost_basis) * default_stop
+		)  # limit our loss to 5% from cost basis
+		if position.symbol not in minute_history:
+			minute_history[position.symbol] = stock_data.get_minute_historical(position.symbol, num_minutes=1000)
 	# Keep track of what we're buying/selling
 	target_prices = {}
 	partial_fills = {}
@@ -131,7 +137,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = qty
 				positions[symbol] += qty
 				open_orders[symbol] = data.order
-				print(f"Filled partial {data.order['side']} order. {abs(qty)} shares @ {data.order['price']} ")
+				print(f"Filled partial {data.order['side']} order. {abs(qty)} shares @ {data.order['filled_avg_price']} ")
 			
 			elif event == 'fill':
 				qty = int(data.order['filled_qty'])
@@ -143,14 +149,13 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = 0
 				positions[symbol] += qty
 				open_orders[symbol] = None
-				print(f"Filled {data.order['side']} order. {abs(qty)} shares @ {data.order['price']} ")
+				print(f"Filled {data.order['side']} order. {abs(qty)} shares @ {data.order['filled_avg_price']} ")
 			elif event == 'canceled' or event == 'rejected':
 				partial_fills[symbol] = 0
 				open_orders[symbol] = None
 	
 	@conn.on(r'A$')
 	async def handle_second_bar(conn, channel, data):
-		symbol = data.symbol
 		# First, aggregate 1s bars for up-to-date MACD calculations
 		ts = data.start
 		ts -= timedelta(seconds=ts.second, microseconds=ts.microsecond)
@@ -174,11 +179,12 @@ def run(tickers, market_open_dt, market_close_dt):
 				data.close,
 				current.volume + data.volume
 			]
-		minute_history[symbol].loc[ts] = new_data
+		minute_history[data.symbol].loc[ts] = new_data
 		# Next, check for existing orders for the stock
-		existing_order = open_orders.get(symbol)
+		existing_order = open_orders.get(data.symbol)
 		if existing_order is not None:
 			# Make sure the order's not too old
+			print(f"Existing order for {data.symbol}")
 			submission_ts = existing_order.submitted_at.astimezone(
 				timezone('America/New_York')
 			)
@@ -195,33 +201,33 @@ def run(tickers, market_open_dt, market_close_dt):
 				15 < since_market_open.seconds // 60 < 60
 		):
 			# Check for buy signals
-			
 			# See if we've already bought in first
-			if positions.get(symbol, 0) > 0:
+			if positions.get(data.symbol, 0) > 0:
 				return
 			
 			# See how high the price went during the first 15 minutes
 			lbound = market_open_dt
 			ubound = lbound + timedelta(minutes=15)
 			try:
-				high_15m = minute_history[symbol][lbound:ubound]['high'].max()
+				high_15m = minute_history[data.symbol][lbound:ubound]['high'].max()
 			except Exception as e:
 				# Because we're aggregating on the fly, sometimes the datetime
 				# index can get messy until it's healed by the minute bars
 				return
 			
+		
 			# Get the change since yesterday's market close
 			daily_pct_change = (
-					(data.close - prev_closes[symbol]) / prev_closes[symbol]
+					(data.close - prev_closes[data.symbol]) / prev_closes[data.symbol]
 			)
 			if (
 					daily_pct_change > .04 and
 					data.close > high_15m and
-					volume_today[symbol] > 30000
+					volume_today[data.symbol] > 30000
 			):
 				# check for a positive, increasing MACD
 				hist = macd(
-					minute_history[symbol]['close'].dropna(),
+					minute_history[data.symbol]['close'].dropna(),
 					n_fast=12,
 					n_slow=26
 				)
@@ -231,7 +237,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				):
 					return
 				hist = macd(
-					minute_history[symbol]['close'].dropna(),
+					minute_history[data.symbol]['close'].dropna(),
 					n_fast=40,
 					n_slow=60
 				)
@@ -240,35 +246,35 @@ def run(tickers, market_open_dt, market_close_dt):
 				
 				# Stock has passed all checks; figure out how much to buy
 				stop_price = find_stop(
-					data.close, minute_history[symbol], ts
+					data.close, minute_history[data.symbol], ts
 				)
 				stop_prices[symbol] = stop_price
-				target_prices[symbol] = data.close + (
+				target_prices[data.symbol] = data.close + (
 						(data.close - stop_price) * 3
 				)
 				# buy enough shares to account for 1% of portfolio
-				shares_to_buy = float(api.get_account().portfolio_value) * max_allocation // data.close
+				shares_to_buy = get_current_portfolio_value() * max_allocation // data.close
 				
 				if shares_to_buy == 0:
 					shares_to_buy = 1
-				shares_to_buy -= positions.get(symbol, 0)
+				shares_to_buy -= positions.get(data.symbol, 0)
 				
-				if data.close - stop_price <= 0 or shares_to_buy * data.close < float(api.get_account().cash):
+				if shares_to_buy < 1 or data.close - stop_price <= 0 or shares_to_buy * data.close > float(api.get_account().cash):
 					# do not buy if the price is below or stop price
 					# or we do not have enough cash
 					return
-				
+					
 				print('Submitting buy for {} shares of {} at {}'.format(
-					shares_to_buy, symbol, data.close
+					shares_to_buy, data.symbol, data.close
 				))
 				try:
 					o = api.submit_order(
-						symbol=symbol, qty=str(shares_to_buy), side='buy',
+						symbol=data.symbol, qty=str(shares_to_buy), side='buy',
 						type='limit', time_in_force='day',
 						limit_price=str(data.close)
 					)
 					open_orders[symbol] = o
-					latest_cost_basis[symbol] = data.close
+					latest_cost_basis[data.symbol] = data.close
 				except Exception as e:
 					print(e)
 				return
@@ -279,56 +285,56 @@ def run(tickers, market_open_dt, market_close_dt):
 			# Check for liquidation signals
 			
 			# We can't liquidate if there's no position
-			if positions.get(symbol, 0) == 0:
+			if positions.get(data.symbol, 0) == 0:
 				return
 			
 			# Sell for a loss if it's fallen below our stop price
 			# Sell for a loss if it's below our cost basis and MACD < 0
 			# Sell for a profit if it's above our target price
 			hist = macd(
-				minute_history[symbol]['close'].dropna(),
+				minute_history[data.symbol]['close'].dropna(),
 				n_fast=12,
 				n_slow=21
 			)
 			if (
-					data.close <= stop_prices[symbol] or
-					(data.close >= target_prices[symbol] and hist[-1] <= 0) or
-					(data.close <= latest_cost_basis[symbol] and hist[-1] <= 0)
+					data.close <= stop_prices[data.symbol] or
+					(data.close >= target_prices[data.symbol] and hist[-1] <= 0) or
+					(data.close <= latest_cost_basis[data.symbol] and hist[-1] <= 0)
 			):
 				print('Submitting sell for {} shares of {} at {}'.format(
-					positions.get(symbol, 0), symbol, data.close
+					positions.get(data.symbol, 0), data.symbol, data.close
 				))
 				try:
 					o = api.submit_order(
-						symbol=symbol, qty=str(positions.get(symbol, 0)), side='sell',
+						symbol=data.symbol, qty=str(positions.get(data.symbol, 0)), side='sell',
 						type='limit', time_in_force='day',
 						limit_price=str(data.close)
 					)
-					open_orders[symbol] = o
-					latest_cost_basis[symbol] = data.close
+					open_orders[data.symbol] = o
+					latest_cost_basis[data.symbol] = data.close
 				except Exception as e:
 					print(e)
 			return
 		elif until_market_close.seconds // 60 <= 15:
 			# Liquidate remaining positions on watched symbols at market
 			try:
-				position = api.get_position(symbol)
+				position = api.get_position(data.symbol)
 			except Exception as e:
 				# Exception here indicates that we have no position
 				return
 			print('Trading over, liquidating remaining position in {}'.format(
-				symbol)
+				data.symbol)
 			)
 			api.submit_order(
-				symbol=symbol, qty=position.qty, side='sell',
+				symbol=data.symbol, qty=position.qty, side='sell',
 				type='market', time_in_force='day'
 			)
-			symbols.remove(symbol)
+			symbols.remove(data.symbol)
 			if len(symbols) <= 0:
 				conn.close()
 			conn.deregister([
-				'A.{}'.format(symbol),
-				'AM.{}'.format(symbol)
+				'A.{}'.format(data.symbol),
+				'AM.{}'.format(data.symbol)
 			])
 		else:
 			print(f"{ts} is outside trading hours. Currently watching {len(symbols)} symbols")
@@ -346,10 +352,10 @@ def run(tickers, market_open_dt, market_close_dt):
 			data.volume
 		]
 		# insert bar into minute_stock db
-	
+		
 		minute_data = {
 			'timestamp': ts.to_pydatetime(),
-			'symbol': symbol,
+			'symbol': data.symbol,
 			'open': data.open,
 			'high': data.high,
 			'low': data.low,
@@ -393,4 +399,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-	

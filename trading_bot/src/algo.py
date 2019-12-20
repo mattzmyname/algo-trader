@@ -184,7 +184,6 @@ def run(tickers, market_open_dt, market_close_dt):
 		existing_order = open_orders.get(data.symbol)
 		if existing_order is not None:
 			# Make sure the order's not too old
-			print(f"Existing order for {data.symbol}")
 			submission_ts = existing_order.submitted_at.astimezone(
 				timezone('America/New_York')
 			)
@@ -203,6 +202,7 @@ def run(tickers, market_open_dt, market_close_dt):
 			# Check for buy signals
 			# See if we've already bought in first
 			if positions.get(data.symbol, 0) > 0:
+				print(f"Existing order for {data.symbol}")
 				return
 			
 			# See how high the price went during the first 15 minutes
@@ -336,9 +336,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				'A.{}'.format(data.symbol),
 				'AM.{}'.format(data.symbol)
 			])
-		else:
-			print(f"{ts} is outside trading hours. Currently watching {len(symbols)} symbols")
-	
+
 	# Replace aggregated 1s bars with incoming 1m bars
 	@conn.on(r'AM$')
 	async def handle_minute_bar(conn, channel, data):

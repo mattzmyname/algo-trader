@@ -109,7 +109,7 @@ def get_historical_stock_data(symbols=None, sd=datetime(2019, 1, 1), to_db=False
 		hist_data.append(data)
 	if len(hist_data) == 0:
 		return
-	df = pd.concat([each for each in hist_data])
+	df = pd.concat(hist_data)
 	df.reset_index(level=0, inplace=True)
 	df = df.rename(columns={'day': 'timestamp'})
 	df['timestamp'] = df['timestamp'].dt.date

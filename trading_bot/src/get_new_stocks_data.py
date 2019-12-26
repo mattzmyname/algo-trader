@@ -14,8 +14,11 @@ def main():
 		symbol = tradable[i:i + 1]
 		nyc = timezone('America/New_York')
 		today = datetime.today().astimezone(nyc)
-		yesterday = today - timedelta(days=1)
-		get_historical_stock_data(symbols=symbol, sd=yesterday, to_db=True)
+		yesterday = today - timedelta(days=10)
+		try:
+			print(get_historical_stock_data(symbols=symbol, sd=yesterday, to_db=True))
+		except:
+			pass
 
 
 if __name__ == '__main__':

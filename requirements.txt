@@ -1,3 +1,4 @@
+pylivetrader
 aiomysql
 pytz==2018.7
 ta==0.5.11

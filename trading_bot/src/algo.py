@@ -137,7 +137,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = qty
 				positions[symbol] += qty
 				open_orders[symbol] = data.order
-				print(f"Filled partial {data.order['side']} order. {abs(qty)} shares @ {data.order['filled_avg_price']} ")
+				print(f"Filled partial {data.order['side']} order. {abs(qty)} shares of {symbol} @ {data.order['filled_avg_price']} ")
 			
 			elif event == 'fill':
 				qty = int(data.order['filled_qty'])
@@ -149,7 +149,7 @@ def run(tickers, market_open_dt, market_close_dt):
 				partial_fills[symbol] = 0
 				positions[symbol] += qty
 				open_orders[symbol] = None
-				print(f"Filled {data.order['side']} order. {abs(qty)} shares @ {data.order['filled_avg_price']} ")
+				print(f"Filled {data.order['side']} order. {abs(qty)} shares of {symbol} @ {data.order['filled_avg_price']} ")
 			elif event == 'canceled' or event == 'rejected':
 				partial_fills[symbol] = 0
 				open_orders[symbol] = None

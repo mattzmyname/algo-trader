@@ -19,7 +19,7 @@ def get_db_connection():
 	host = "db-1.cztzalypzdly.us-east-1.rds.amazonaws.com"
 	connect_str = f"mysql+pymysql://{user}:{password}@{host}:3306/mydb"
 	engine = create_engine(connect_str)
-	
+
 	return engine
 
 
@@ -27,7 +27,7 @@ async def a_insert(loop, table, myDict):
 	conn = await aiomysql.connect(user=rds['user'], db='mydb', port=3306,
 	                              host="db-1.cztzalypzdly.us-east-1.rds.amazonaws.com",
 	                              password=rds['password'], loop=loop)
-	
+
 	async with conn.cursor() as cur:
 		placeholders = ', '.join(['%s'] * len(myDict))
 		columns = ', '.join(myDict.keys())
@@ -38,7 +38,7 @@ async def a_insert(loop, table, myDict):
 			print(e)
 			pass
 		await conn.commit()
-		
+
 	conn.close()
 
 
@@ -47,7 +47,7 @@ def index_to_timestamp(df):
 	df = df.rename(columns={'index': 'timestamp'})
 	df['timestamp'] = df['timestamp'].astype('datetime64')
 	df['timestamp'].apply(lambda x: pd.to_datetime(x).tz_localize('US/Eastern'))
-	
+
 	return df
 
 
@@ -83,7 +83,7 @@ def get_alpaca_api():
 	base_url = 'https://paper-api.alpaca.markets'
 	api_key_id = alpaca['api_key']
 	api_secret = alpaca['secret_key']
-	
+
 	api = tradeapi.REST(
 		base_url=base_url,
 		key_id=api_key_id,
@@ -92,29 +92,35 @@ def get_alpaca_api():
 	return api
 
 
-def get_historical_stock_data(symbols=None, days=1, to_db=False):
+def get_historical_stock_data(symbols=None, sd=datetime(2019, 1, 1), to_db=False):
 	# Only doing one day here as an example
 	if symbols is None:
 		symbols = get_tradable_symbols()
-	
+
 	api = get_alpaca_api()
 	nyc = pytz.timezone("America/New_York")
 	today_str = datetime.today().astimezone(nyc).strftime('%Y-%m-%d')
-	from_day = (datetime.today() - timedelta(days=days)).astimezone(nyc)
+	from_day = sd
 	from_day_fmt = from_day.strftime('%Y-%m-%d')
 	hist_data = []
 	for symbol in symbols:
-		data = api.polygon.historic_agg_v2(
-			symbol=symbol, multiplier=1, timespan='hour', _from=from_day_fmt, to=today_str
-		).df
+		data = api.polygon.historic_agg_v2(symbol, 1, 'day', _from=from_day_fmt, to=today_str).df
 		data.insert(0, column='symbol', value=symbol)
 		hist_data.append(data)
-	
-	df = pd.concat([each for each in hist_data], sort=False)
-	df = index_to_timestamp(df)
+	if len(hist_data) == 0:
+		return
+	df = pd.concat([each for each in hist_data])
+	df.reset_index(level=0, inplace=True)
+	df = df.rename(columns={'day': 'timestamp'})
+	df['timestamp'] = df['timestamp'].dt.date
+
 	if to_db:
-		e = get_db_connection()
-		df.to_sql(name='stocks', con=e, if_exists='append', chunksize=1000, index=False)
+		try:
+			e = get_db_connection()
+			df.to_sql(name='stocks', con=e, if_exists='append', chunksize=1000, index=False)
+			e.dispose()
+		except Exception as e:
+			print(e)
 	return df
 
 
@@ -127,6 +133,15 @@ def get_minute_historical(symbol, num_minutes=1):
 
 if __name__ == '__main__':
 	start_time = time.time()
-	api = get_alpaca_api()
-	print(api.get_account())
+	tradable = get_tradable_symbols()
+	off = True
+	for i in range(len(tradable)):
+		symbol = tradable[i:i + 1]
+		if symbol == ['EWJV']:
+			off = False
+		if off:
+			continue
+		print(symbol)
+		get_historical_stock_data(symbols=symbol, sd=datetime(2018, 1, 1), to_db=True)
+
 	print(f'Completed in {time.time() - start_time} seconds ')

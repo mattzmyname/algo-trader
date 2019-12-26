@@ -134,13 +134,8 @@ def get_minute_historical(symbol, num_minutes=1):
 if __name__ == '__main__':
 	start_time = time.time()
 	tradable = get_tradable_symbols()
-	off = True
 	for i in range(len(tradable)):
 		symbol = tradable[i:i + 1]
-		if symbol == ['EWJV']:
-			off = False
-		if off:
-			continue
 		print(symbol)
 		get_historical_stock_data(symbols=symbol, sd=datetime(2018, 1, 1), to_db=True)
 

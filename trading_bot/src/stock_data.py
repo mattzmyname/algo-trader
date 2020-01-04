@@ -133,10 +133,4 @@ def get_minute_historical(symbol, num_minutes=1):
 
 if __name__ == '__main__':
 	start_time = time.time()
-	tradable = get_tradable_symbols()
-	for i in range(len(tradable)):
-		symbol = tradable[i:i + 1]
-		print(symbol)
-		get_historical_stock_data(symbols=symbol, sd=datetime(2018, 1, 1), to_db=True)
-
 	print(f'Completed in {time.time() - start_time} seconds ')

@@ -14,9 +14,9 @@ def main():
 		symbol = tradable[i:i + 1]
 		nyc = timezone('America/New_York')
 		today = datetime.today().astimezone(nyc)
-		yesterday = today - timedelta(days=10)
+		yesterday = today - timedelta(days=1)
 		try:
-			print(get_historical_stock_data(symbols=symbol, sd=yesterday, to_db=True))
+			get_historical_stock_data(symbols=symbol, sd=yesterday, to_db=True)
 		except:
 			pass
 
